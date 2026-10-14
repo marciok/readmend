@@ -4,16 +4,26 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { RunStatusResponse } from "@/app/api/runs/[id]/route";
-import type { Report } from "@/lib/report";
+import type { BrokenLink, Report } from "@/lib/report";
+import type { Suggestion } from "@/lib/suggest";
 import type { ProgressEvent } from "@/workflows/readme-links";
 
 const TERMINAL = ["completed", "failed", "cancelled"];
+
+const STATUS = {
+  pending: { label: "Queued", dot: "bg-faint", text: "text-muted" },
+  running: { label: "Running", dot: "bg-warning animate-pulse", text: "text-warning" },
+  completed: { label: "Ready", dot: "bg-success", text: "text-success" },
+  failed: { label: "Error", dot: "bg-error", text: "text-error" },
+  cancelled: { label: "Canceled", dot: "bg-faint", text: "text-muted" },
+} as const;
 
 export function RunView({ runId }: { runId: string }) {
   const [run, setRun] = useState<RunStatusResponse | null>(null);
   const [notFound, setNotFound] = useState(false);
   const searchParams = useSearchParams();
-  const events = useProgress(runId, run !== null && TERMINAL.includes(run.status));
+  const finished = run !== null && TERMINAL.includes(run.status);
+  const events = useProgress(runId, finished);
 
   // The report and final status come from polling: a failed run never closes its progress stream.
   useEffect(() => {
@@ -38,45 +48,60 @@ export function RunView({ runId }: { runId: string }) {
 
   if (notFound) {
     return (
-      <div className="rounded-xl border border-zinc-200 p-8 text-center dark:border-zinc-800">
+      <div className="rounded-lg border bg-background p-10 text-center">
         <p className="font-medium">This run doesn&apos;t exist.</p>
-        <Link href="/" className="mt-2 inline-block text-sm underline">
-          Check another repository
+        <Link href="/" className="mt-3 inline-block text-sm text-accent hover:underline">
+          Start a new check
         </Link>
       </div>
     );
   }
 
   // the form passes the URL along so the header has it before the report exists
-  const repo = run?.report?.repo ?? searchParams.get("repo");
+  const repo = run?.report?.repo ?? searchParams.get("repo") ?? runId;
+  const status = STATUS[run?.status ?? "pending"];
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wide text-zinc-500">Link check</p>
-          <h1 className="truncate font-mono text-lg" title={runId}>{repo ?? runId}</h1>
-        </div>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight" title={repo}>
+          {repo.replace(/^https?:\/\/github\.com\//, "")}
+        </h1>
         <StatusBadge status={run?.status ?? "pending"} />
-      </header>
+      </div>
+
+      <dl className="grid grid-cols-2 overflow-hidden rounded-lg border bg-background sm:grid-cols-4 sm:divide-x">
+        <Meta label="Repository">
+          <a href={repo} target="_blank" rel="noreferrer" className="block truncate hover:underline">
+            {repo.replace(/^https?:\/\//, "")}
+          </a>
+        </Meta>
+        <Meta label="Status">
+          <span className={`flex items-center gap-2 ${status.text}`}>
+            <span className={`size-2 rounded-full ${status.dot}`} />
+            {status.label}
+          </span>
+        </Meta>
+        <Meta label="Duration">
+          <Duration from={run?.createdAt} to={run?.completedAt} />
+        </Meta>
+        <Meta label="Run">
+          <span className="block truncate font-mono text-xs" title={runId}>
+            {runId}
+          </span>
+        </Meta>
+      </dl>
 
       {run?.status === "failed" && (
-        <div id="run-error" role="alert" className="rounded-xl bg-red-50 p-5 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+        <div id="run-error" role="alert" className="rounded-lg border border-error/30 bg-error-bg p-4 text-sm text-error">
           <p className="font-medium">The check failed</p>
           <p className="mt-1 break-words font-mono text-xs">{run.error}</p>
         </div>
       )}
 
-      {run?.report ? <ReportView report={run.report} /> : <ProgressLog events={events} />}
+      {run?.report && <ReportView report={run.report} />}
 
-      {run?.report && (
-        <details className="text-sm text-zinc-500">
-          <summary className="cursor-pointer select-none">Progress log</summary>
-          <div className="mt-3">
-            <ProgressLog events={events} />
-          </div>
-        </details>
-      )}
+      <LogPanel events={events} running={!finished} collapsible={Boolean(run?.report)} />
     </div>
   );
 }
@@ -86,7 +111,9 @@ function useProgress(runId: string, finished: boolean) {
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const count = useRef(0);
   const finishedRef = useRef(finished);
-  finishedRef.current = finished;
+  useEffect(() => {
+    finishedRef.current = finished;
+  }, [finished]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -122,87 +149,144 @@ function useProgress(runId: string, finished: boolean) {
   return events;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
-    running: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-    completed: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-    failed: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
-    cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
-  };
+function StatusBadge({ status }: { status: keyof typeof STATUS }) {
+  const s = STATUS[status];
   return (
-    <span id="run-status" className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${styles[status] ?? styles.pending}`}>
-      {(status === "running" || status === "pending") && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
-      {status}
+    <span id="run-status" className="inline-flex h-7 items-center gap-2 rounded-full border bg-background px-3 text-xs font-medium">
+      <span className={`size-2 rounded-full ${s.dot}`} />
+      {s.label}
     </span>
   );
 }
 
-function ProgressLog({ events }: { events: ProgressEvent[] }) {
-  const end = useRef<HTMLLIElement>(null);
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "nearest" });
-  }, [events.length]);
+function Meta({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 p-4 max-sm:border-b max-sm:odd:border-r max-sm:[&:nth-last-child(-n+2)]:border-b-0">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="mt-1.5 text-sm font-medium">{children}</dd>
+    </div>
+  );
+}
 
-  if (events.length === 0) {
-    return <p className="text-sm text-zinc-500">Starting a sandbox and cloning the repository…</p>;
-  }
+function Duration({ from, to }: { from?: string; to?: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (to || !from) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [from, to]);
+
+  if (!from) return <span className="text-muted">—</span>;
+  const ms = (to ? Date.parse(to) : now) - Date.parse(from);
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return <span className="tabular-nums">{seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}</span>;
+}
+
+function LogPanel({ events, running, collapsible }: { events: ProgressEvent[]; running: boolean; collapsible: boolean }) {
+  const [open, setOpen] = useState(false);
+  const end = useRef<HTMLLIElement>(null);
+  const expanded = open || !collapsible;
+  useEffect(() => {
+    if (expanded) end.current?.scrollIntoView({ block: "nearest" });
+  }, [events.length, expanded]);
 
   return (
-    <ol id="progress-log" className="max-h-96 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-50 p-4 font-mono text-xs leading-6 dark:border-zinc-800 dark:bg-zinc-900">
-      {events.map((event, i) => (
-        <li key={i} ref={i === events.length - 1 ? end : undefined} className="flex gap-3">
-          <span className="w-20 shrink-0 text-zinc-400">{event.stage}</span>
-          <span className="break-all">{event.message}</span>
-        </li>
-      ))}
-    </ol>
+    <section className="overflow-hidden rounded-lg border bg-background">
+      <button
+        type="button"
+        onClick={() => collapsible && setOpen(!open)}
+        className={`flex w-full items-center justify-between px-4 py-3 text-sm ${collapsible ? "hover:bg-hover" : "cursor-default"}`}
+      >
+        <span className="flex items-center gap-2 font-medium">
+          {collapsible && <span className={`text-faint transition-transform ${expanded ? "rotate-90" : ""}`}>›</span>}
+          Logs
+        </span>
+        <span className="flex items-center gap-2 text-xs text-muted">
+          {running && <span className="size-3 animate-spin rounded-full border-2 border-border border-t-foreground" />}
+          {events.length} lines
+        </span>
+      </button>
+      {expanded && (
+        <ol id="progress-log" className="max-h-[28rem] overflow-y-auto border-t bg-background-subtle py-2 font-mono text-[12.5px] leading-6">
+          {events.length === 0 && <li className="px-4 text-muted">Starting a sandbox and cloning the repository…</li>}
+          {events.map((event, i) => (
+            <li key={i} ref={i === events.length - 1 ? end : undefined} className="flex gap-4 px-4 hover:bg-hover">
+              <span className="shrink-0 tabular-nums text-faint">{event.at.slice(11, 23)}</span>
+              <span className={`w-20 shrink-0 ${event.stage === "fix" ? "text-accent" : "text-muted"}`}>{event.stage}</span>
+              <span className={`min-w-0 break-all ${logTone(event.message)}`}>{event.message}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
+}
+
+function logTone(message: string) {
+  if (message.startsWith("broken")) return "text-error";
+  if (message.startsWith("unknown")) return "text-warning";
+  return "";
 }
 
 function ReportView({ report }: { report: Report }) {
   const { totals } = report;
   const brokenCount = totals.internalBroken + totals.externalBroken;
-  const github = report.cloneUrl.match(/^https?:\/\/github\.com\/[^/]+\/[^/]+$/) ? report.cloneUrl : null;
+  const fixedCount = report.broken.flatMap((p) => p.links).filter((l) => l.suggestion?.url).length;
+  const github = /^https?:\/\/github\.com\/[^/]+\/[^/]+$/.test(report.cloneUrl) ? report.cloneUrl : null;
   const fileUrl = (page: string) => (github ? `${github}/blob/${report.ref ?? "HEAD"}/${page}` : null);
 
   return (
-    <div id="report" className="flex flex-col gap-8">
+    <div id="report" className="flex flex-col gap-10">
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Pages crawled" value={totals.pages} />
-        <Stat label="Broken links" value={brokenCount} tone={brokenCount > 0 ? "bad" : "good"} />
-        <Stat label="Internal checked" value={totals.internalChecked} detail={`${totals.internalBroken} broken`} />
-        <Stat label="External checked" value={totals.externalChecked} detail={`${totals.externalBroken} broken`} />
+        <Stat label="Broken links" value={brokenCount} tone={brokenCount > 0 ? "error" : "success"} />
+        <Stat
+          label="Fixes proposed"
+          value={fixedCount}
+          tone={fixedCount > 0 ? "success" : undefined}
+          detail={brokenCount ? `of ${brokenCount} broken` : undefined}
+        />
+        <Stat
+          label="Links checked"
+          value={totals.internalChecked + totals.externalChecked}
+          detail={`${totals.internalChecked} internal · ${totals.externalChecked} external`}
+        />
       </dl>
 
       {report.truncated && (
-        <p className="text-sm text-amber-700 dark:text-amber-400">
-          The crawl stopped at the page limit; raise &ldquo;Maximum pages&rdquo; to check the rest.
-        </p>
+        <Notice>The crawl stopped at the page limit. Raise &ldquo;Max pages&rdquo; to check the rest.</Notice>
       )}
 
       <section id="broken-links" className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold">Broken links</h2>
+        <SectionHeading title="Broken links" count={brokenCount} />
+        {report.fixes.status === "failed" && <Notice>Couldn&apos;t get proposed fixes from eve: {report.fixes.message}</Notice>}
         {report.broken.length === 0 ? (
-          <p className="text-sm text-zinc-500">No broken links found.</p>
+          <div className="rounded-lg border bg-background p-10 text-center text-sm text-muted">
+            <span className="mx-auto mb-3 flex size-8 items-center justify-center rounded-full bg-success-bg text-success">✓</span>
+            No broken links found.
+          </div>
         ) : (
           report.broken.map(({ page, links }) => (
-            <article key={page} className="rounded-xl border border-zinc-200 dark:border-zinc-800">
-              <header className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-                <h3 className="truncate font-mono text-sm">{page}</h3>
+            <article key={page} className="overflow-hidden rounded-lg border bg-background">
+              <header className="flex items-center justify-between gap-3 border-b bg-background-subtle px-4 py-2.5">
+                <h3 className="flex min-w-0 items-center gap-2 font-mono text-[13px]">
+                  <FileIcon />
+                  <span className="truncate">{page}</span>
+                </h3>
                 {fileUrl(page) && (
-                  <a href={fileUrl(page)!} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-zinc-500 underline hover:text-zinc-900 dark:hover:text-zinc-100">
-                    View file
+                  <a
+                    href={fileUrl(page)!}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-7 shrink-0 items-center rounded-md border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-hover"
+                  >
+                    View file ↗
                   </a>
                 )}
               </header>
-              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+              <ul className="divide-y">
                 {links.map((link, i) => (
-                  <li key={i} className="flex flex-col gap-1 px-4 py-3 text-sm">
-                    <code className="break-all text-red-700 dark:text-red-400">{link.url}</code>
-                    {link.text && <span className="text-zinc-500">&ldquo;{link.text}&rdquo;</span>}
-                    <span className="text-xs text-zinc-500">{link.reason}</span>
-                  </li>
+                  <BrokenLinkRow key={i} link={link} />
                 ))}
               </ul>
             </article>
@@ -211,15 +295,15 @@ function ReportView({ report }: { report: Report }) {
       </section>
 
       {report.unknown.length > 0 && (
-        <section id="unknown-links" className="flex flex-col gap-3">
-          <h2 className="text-base font-semibold">Couldn&apos;t verify</h2>
-          <ul className="flex flex-col gap-2 text-sm">
+        <section id="unknown-links" className="flex flex-col gap-4">
+          <SectionHeading title="Couldn't verify" count={report.unknown.length} />
+          <ul className="divide-y overflow-hidden rounded-lg border bg-background">
             {report.unknown.map((link) => (
-              <li key={link.url} className="rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800">
-                <code className="break-all">{link.url}</code>
-                <p className="mt-1 text-xs text-zinc-500">
+              <li key={link.url} className="flex flex-col gap-1 px-4 py-3">
+                <code className="break-all font-mono text-[13px]">{link.url}</code>
+                <span className="text-xs text-muted">
                   {link.reason} · linked from {link.pages.length} page{link.pages.length === 1 ? "" : "s"}
-                </p>
+                </span>
               </li>
             ))}
           </ul>
@@ -229,13 +313,92 @@ function ReportView({ report }: { report: Report }) {
   );
 }
 
-function Stat({ label, value, detail, tone }: { label: string; value: number; detail?: string; tone?: "good" | "bad" }) {
-  const color = tone === "bad" ? "text-red-600 dark:text-red-400" : tone === "good" ? "text-emerald-600 dark:text-emerald-400" : "";
+function BrokenLinkRow({ link }: { link: BrokenLink }) {
+  const suggestion = link.suggestion;
   return (
-    <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-      <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</dd>
-      {detail && <dd className="text-xs text-zinc-500">{detail}</dd>}
+    <li className="flex flex-col gap-2.5 px-4 py-4">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {link.text && <span className="text-sm font-medium">{link.text}</span>}
+        <span className="text-xs text-muted">{link.reason}</span>
+      </div>
+
+      <div className="overflow-hidden rounded-md border font-mono text-[12.5px] leading-6">
+        <div className="flex gap-3 bg-error-bg px-3 text-error">
+          <span className="select-none">−</span>
+          <span className="break-all">{link.url}</span>
+        </div>
+        {suggestion?.url && (
+          <div className="flex gap-3 border-t bg-success-bg px-3 text-success">
+            <span className="select-none">+</span>
+            <span className="break-all">{suggestion.url}</span>
+          </div>
+        )}
+      </div>
+
+      {suggestion && <SuggestionMeta suggestion={suggestion} />}
+    </li>
+  );
+}
+
+function SuggestionMeta({ suggestion }: { suggestion: Suggestion }) {
+  const tone = {
+    high: "border-success/30 bg-success-bg text-success",
+    medium: "border-warning/30 bg-warning-bg text-warning",
+    low: "bg-background-subtle text-muted",
+  }[suggestion.confidence];
+
+  return (
+    <div className="flex flex-col gap-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 font-medium text-accent">
+          <SparkIcon /> Proposed by eve
+        </span>
+        <span className={`rounded-full border px-2 py-px font-medium ${tone}`}>{suggestion.confidence} confidence</span>
+        {suggestion.url && !suggestion.verified && <span className="text-warning">target not found in the repo</span>}
+        {!suggestion.url && <span className="text-muted">No good replacement: consider removing the link.</span>}
+      </div>
+      <p className="leading-5 text-muted">{suggestion.reason}</p>
     </div>
+  );
+}
+
+function SectionHeading({ title, count }: { title: string; count: number }) {
+  return (
+    <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+      {title}
+      <span className="rounded-full border bg-background px-2 text-xs font-medium tabular-nums text-muted">{count}</span>
+    </h2>
+  );
+}
+
+function Stat({ label, value, detail, tone }: { label: string; value: number; detail?: string; tone?: "success" | "error" }) {
+  const color = tone === "error" ? "text-error" : tone === "success" ? "text-success" : "";
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className={`mt-2 text-3xl font-semibold tracking-tight tabular-nums ${color}`}>{value}</dd>
+      {detail && <dd className="mt-0.5 text-xs text-muted">{detail}</dd>}
+    </div>
+  );
+}
+
+function Notice({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-lg border border-warning/30 bg-warning-bg px-4 py-3 text-sm text-warning">{children}</p>;
+}
+
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="1.3">
+      <path d="M9 1.5H4.5a1 1 0 00-1 1v11a1 1 0 001 1h7a1 1 0 001-1V5L9 1.5z" />
+      <path d="M9 1.5V5h3.5" />
+    </svg>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden className="size-3.5" fill="currentColor">
+      <path d="M8 0l1.6 5.1L15 6.4l-4.4 2.9L11.7 15 8 11.7 4.3 15l1.1-5.7L1 6.4l5.4-1.3L8 0z" />
+    </svg>
   );
 }

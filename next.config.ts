@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withEve } from "eve/next";
 import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
@@ -16,4 +17,5 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withWorkflow(nextConfig);
+// withEve mounts the link-doctor agent in agent/ at /eve/v1/* (a separate service on the same deployment)
+export default withEve(withWorkflow(nextConfig));

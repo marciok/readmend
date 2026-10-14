@@ -4,11 +4,11 @@ import { RunView } from "@/components/run-view";
 
 export default function RunPage({ params }: PageProps<"/runs/[id]">) {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
-      <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-        ← Check another repository
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
+      <Link href="/" className="w-fit text-sm text-muted transition-colors hover:text-foreground">
+        ← New check
       </Link>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+      <Suspense fallback={<div className="h-40 animate-pulse rounded-lg border bg-background" />}>
         {params.then(({ id }) => (
           <RunView runId={id} />
         ))}

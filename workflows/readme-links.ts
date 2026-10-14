@@ -1,5 +1,5 @@
-import { FatalError, getWritable } from "workflow";
-import { checkUrl, findReadme, parseSource } from "@/lib/links";
+import { FatalError, getWritable, sleep } from "workflow";
+import { checkUrl, findReadme, isMarkdown, parseSource } from "@/lib/links";
 import { crawl, describeTargets, PermanentError, snapshotRepo } from "@/lib/crawl";
 import {
   buildReport,
@@ -13,6 +13,17 @@ import {
   type InternalCheck,
   type Report,
 } from "@/lib/report";
+import {
+  collectProblems,
+  endSession,
+  pollSession,
+  problemKey,
+  proposeUrl,
+  startSession,
+  type Fix,
+  type PollResult,
+  type Problem,
+} from "@/lib/suggest";
 
 export interface RunInput {
   repo: string;
@@ -21,11 +32,16 @@ export interface RunInput {
 
 export interface ProgressEvent {
   at: string;
-  stage: "crawl" | "categorize" | "external" | "internal" | "report";
+  stage: "crawl" | "categorize" | "external" | "internal" | "fix" | "report";
   message: string;
 }
 
-// crawl → categorize → (external checks ‖ internal checks) → report
+interface FixBatch {
+  fixes: Fix[];
+  error: string | null;
+}
+
+// crawl → categorize → (external checks ‖ internal checks) → eve proposes fixes → report
 export async function readmeLinks(input: RunInput): Promise<Report> {
   "use workflow";
 
@@ -37,7 +53,39 @@ export async function readmeLinks(input: RunInput): Promise<Report> {
     checkInternalLinks(crawled, categorized),
   ]);
 
-  return await finish(crawled, internalChecks, externalChecks);
+  const problems = await planFixes(internalChecks);
+  const source = { cloneUrl: crawled.cloneUrl, ref: crawled.ref, scope: crawled.scope };
+  const batches = await Promise.all(chunk(problems, FIX_BATCH_SIZE).map((batch) => askLinkDoctor(source, batch)));
+
+  return await finish(crawled, internalChecks, externalChecks, problems, batches);
+}
+
+const FIX_BATCH_SIZE = 10;
+const FIX_POLL_INTERVAL = "10s";
+const FIX_MAX_POLLS = 90; // 15 minutes
+
+// An agent investigation can outlast a function's duration limit, so no step waits on it: one step
+// starts the eve session, then the workflow sleeps durably between short polls.
+async function askLinkDoctor(source: AgentSource, problems: Problem[]): Promise<FixBatch> {
+  const sessionId = await startLinkDoctor(source, problems);
+  if (!sessionId) return { fixes: [], error: "could not start the eve agent" };
+
+  try {
+    for (let i = 0; i < FIX_MAX_POLLS; i++) {
+      await sleep(FIX_POLL_INTERVAL);
+      const poll = await pollLinkDoctor(sessionId);
+      if (poll.done) return { fixes: poll.fixes, error: poll.error };
+    }
+    return { fixes: [], error: "the eve agent did not answer within 15 minutes" };
+  } finally {
+    await endLinkDoctor(sessionId);
+  }
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
 }
 
 // Clones in a Vercel Sandbox and follows relative links between markdown pages, starting at the
@@ -69,6 +117,7 @@ async function crawlDocs({ repo, maxPages }: RunInput): Promise<CrawlResult> {
       truncated,
       pages,
       targets: describeTargets(snapshot, pages),
+      markdownFiles: [...snapshot.contents.keys()].filter(isMarkdown),
     };
   } catch (error) {
     if (error instanceof PermanentError) throw new FatalError(error.message);
@@ -116,10 +165,97 @@ async function checkInternalLinks(crawled: CrawlResult, categorized: Categorized
   return checks;
 }
 
-async function finish(crawled: CrawlResult, internal: InternalCheck[], external: ExternalCheck[]): Promise<Report> {
+interface AgentSource {
+  cloneUrl: string;
+  ref: string | null;
+  scope: string;
+}
+
+async function planFixes(internal: InternalCheck[]): Promise<Problem[]> {
+  "use step";
+
+  const problems = collectProblems(internal);
+  if (problems.length > 0) {
+    await emit("fix", `Asking eve to propose fixes for ${problems.length} broken targets`);
+  }
+  return problems;
+}
+
+// Failures in the fix steps never fail the run: the report is still useful without suggestions.
+async function startLinkDoctor(source: AgentSource, problems: Problem[]): Promise<string | null> {
+  "use step";
+
+  const message =
+    "Find the correct target for each broken link below and return your fixes.\n\n" +
+    JSON.stringify({ repo: source.cloneUrl, ref: source.ref, scope: source.scope, problems }, null, 2);
+  try {
+    const sessionId = await startSession(message);
+    await emit("fix", `eve session ${sessionId} is investigating ${problems.length} targets`);
+    return sessionId;
+  } catch (error) {
+    await emit("fix", `Could not start the eve agent: ${error instanceof Error ? error.message : error}`);
+    return null;
+  }
+}
+startLinkDoctor.maxRetries = 2;
+
+async function pollLinkDoctor(sessionId: string): Promise<PollResult> {
+  "use step";
+
+  try {
+    const result = await pollSession(sessionId);
+    if (result.done) {
+      await emit("fix", result.error ? `eve failed: ${result.error}` : `eve proposed ${result.fixes.length} fixes`);
+    }
+    return result;
+  } catch {
+    return { done: false }; // transient: the next poll tries again
+  }
+}
+
+async function endLinkDoctor(sessionId: string): Promise<void> {
+  "use step";
+
+  await endSession(sessionId).catch((error) => console.warn(`could not reset eve session ${sessionId}:`, error));
+}
+
+async function finish(
+  crawled: CrawlResult,
+  internal: InternalCheck[],
+  external: ExternalCheck[],
+  problems: Problem[],
+  batches: FixBatch[],
+): Promise<Report> {
   "use step";
 
   const report = buildReport(crawled, internal, external);
+
+  const fixes = new Map(batches.flatMap((b) => b.fixes).map((fix) => [fix.id, fix]));
+  const problemIds = new Map(problems.map((p) => [problemKey({ target: p.target, url: p.links[0].url, fragment: p.fragment }), p.id]));
+  const markdownFiles = new Set(crawled.markdownFiles);
+  for (const { page, links } of report.broken) {
+    for (const link of links) {
+      if (link.target === undefined) continue;
+      const fix = fixes.get(problemIds.get(problemKey(link)) ?? "");
+      if (!fix) continue;
+      link.suggestion = {
+        url: proposeUrl(link.url, page, link.target ?? null, fix),
+        target: fix.target,
+        confidence: fix.confidence,
+        reason: fix.reason,
+        verified: fix.target !== null && markdownFiles.has(fix.target),
+      };
+    }
+  }
+
+  const errors = batches.map((b) => b.error).filter((e): e is string => e !== null);
+  report.fixes =
+    problems.length === 0
+      ? { status: "none-needed", message: null }
+      : fixes.size === 0 && errors.length > 0
+        ? { status: "failed", message: errors.join("; ") }
+        : { status: "done", message: errors.length > 0 ? errors.join("; ") : null };
+
   await emit("report", `Done: ${report.totals.internalBroken + report.totals.externalBroken} broken links`);
   await getWritable<ProgressEvent>().close();
   return report;

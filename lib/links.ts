@@ -256,7 +256,8 @@ function decode(value: string): string | null {
   }
 }
 
-const squish = (text: string) => text.replace(/\s+/g, " ").trim();
+// Link labels as a reader sees them: whitespace collapsed, **bold**/__bold__/`code` markers dropped
+const squish = (text: string) => text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
 const uniqBy = <T,>(xs: T[], key: (x: T) => string) => {
   const seen = new Set<string>();

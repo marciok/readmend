@@ -1,26 +1,93 @@
 @import "tailwindcss";
 
+/* Geist-style tokens: near-white/near-black surfaces, a neutral gray scale, thin borders, and
+   semantic colors used sparingly (blue for focus/links, green/amber/red for status). */
 :root {
   --background: #ffffff;
+  --background-subtle: #fafafa;
   --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --muted: #666666;
+  --faint: #8f8f8f;
+  --border: #ebebeb;
+  --border-strong: #c9c9c9;
+  --hover: #f2f2f2;
+  --accent: #006bff;
+  --success: #297a3a;
+  --success-bg: #ebfaef;
+  --warning: #a35200;
+  --warning-bg: #fff4e5;
+  --error: #cb2a2f;
+  --error-bg: #ffebec;
+  --ring: rgba(0, 0, 0, 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
+    --background-subtle: #000000;
     --foreground: #ededed;
+    --muted: #a1a1a1;
+    --faint: #737373;
+    --border: #262626;
+    --border-strong: #454545;
+    --hover: #1a1a1a;
+    --accent: #47a8ff;
+    --success: #62c073;
+    --success-bg: #0b2311;
+    --warning: #f1a10d;
+    --warning-bg: #2a1c03;
+    --error: #ff6166;
+    --error-bg: #330e10;
+    --ring: rgba(255, 255, 255, 0.16);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-background-subtle: var(--background-subtle);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-hover: var(--hover);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-error: var(--error);
+  --color-error-bg: var(--error-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
   }
 }
 
 body {
-  background: var(--background);
+  background: var(--background-subtle);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Faint grid behind the hero, fading out toward the edges. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, var(--border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 40%, transparent 100%);
+}
+
+.focus-ring:focus-visible,
+.focus-ring:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 4px var(--ring);
 }

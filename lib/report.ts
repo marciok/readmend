@@ -1,4 +1,5 @@
 import { siteRoute, type Link } from "./links";
+import type { Suggestion } from "./suggest";
 
 export interface Page {
   path: string;
@@ -22,6 +23,8 @@ export interface CrawlResult {
   truncated: boolean;
   pages: Page[];
   targets: Record<string, Target>;
+  /** Every markdown file in the repo, to check the paths the agent proposes. */
+  markdownFiles: string[];
 }
 
 export type SourcedLink = Link & { source: string };
@@ -56,6 +59,15 @@ export interface BrokenLink {
   url: string;
   text: string | null;
   reason: string;
+  /** Internal links only: what the link resolved to, used to match suggestions. */
+  target?: string | null;
+  fragment?: string | null;
+  suggestion?: Suggestion;
+}
+
+export interface FixStatus {
+  status: "none-needed" | "done" | "failed";
+  message: string | null;
 }
 
 export interface UnknownLink {
@@ -81,6 +93,7 @@ export interface Report {
   };
   broken: { page: string; links: BrokenLink[] }[];
   unknown: UnknownLink[];
+  fixes: FixStatus;
 }
 
 export function categorize(crawl: CrawlResult): Categorized {
@@ -129,7 +142,14 @@ function checkInternalLink(
 export function buildReport(crawl: CrawlResult, internal: InternalCheck[], external: ExternalCheck[]): Report {
   const brokenInternal = internal
     .filter((l) => l.ok === false)
-    .map((l) => ({ page: l.source, url: l.url, text: l.text, reason: l.reason ?? "broken" }));
+    .map((l) => ({
+      page: l.source,
+      url: l.url,
+      text: l.text,
+      reason: l.reason ?? "broken",
+      target: l.target,
+      fragment: l.fragment,
+    }));
 
   const brokenExternal = external
     .filter((l) => l.exists === false)
@@ -142,9 +162,13 @@ export function buildReport(crawl: CrawlResult, internal: InternalCheck[], exter
     .filter((l) => l.exists === null)
     .map((l) => ({ url: l.url, pages: l.sources, reason: l.error ?? `HTTP ${l.status}` }));
 
-  const broken = [...groupBy([...brokenInternal, ...brokenExternal], (l) => l.page)]
+  const allBroken: (BrokenLink & { page: string })[] = [...brokenInternal, ...brokenExternal];
+  const broken = [...groupBy(allBroken, (l) => l.page)]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([page, links]) => ({ page, links: links.map(({ url, text, reason }) => ({ url, text, reason })) }));
+    .map(([page, links]) => ({
+      page,
+      links: links.map(({ url, text, reason, target, fragment }): BrokenLink => ({ url, text, reason, target, fragment })),
+    }));
 
   return {
     repo: crawl.repo,
@@ -163,6 +187,7 @@ export function buildReport(crawl: CrawlResult, internal: InternalCheck[], exter
     },
     broken,
     unknown: [...unknownInternal, ...unknownExternal],
+    fixes: { status: "none-needed", message: null },
   };
 }
 
