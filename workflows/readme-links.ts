@@ -1,5 +1,6 @@
-import { FatalError, getWritable, sleep } from "workflow";
+import { FatalError, getWorkflowMetadata, getWritable, sleep } from "workflow";
 import { checkUrl, findReadme, isMarkdown, parseSource } from "@/lib/links";
+import { buildPullRequest } from "@/lib/pull-request";
 import { crawl, describeTargets, PermanentError, snapshotRepo } from "@/lib/crawl";
 import {
   buildReport,
@@ -41,7 +42,7 @@ interface FixBatch {
   error: string | null;
 }
 
-// crawl → categorize → (external checks ‖ internal checks) → eve proposes fixes → report
+// crawl → categorize → (external checks ‖ internal checks) → eve proposes fixes → report → PR text
 export async function readmeLinks(input: RunInput): Promise<Report> {
   "use workflow";
 
@@ -57,7 +58,8 @@ export async function readmeLinks(input: RunInput): Promise<Report> {
   const source = { cloneUrl: crawled.cloneUrl, ref: crawled.ref, scope: crawled.scope };
   const batches = await Promise.all(chunk(problems, FIX_BATCH_SIZE).map((batch) => askLinkDoctor(source, batch)));
 
-  return await finish(crawled, internalChecks, externalChecks, problems, batches);
+  const report = await finish(crawled, internalChecks, externalChecks, problems, batches);
+  return await writePullRequest(report, getWorkflowMetadata().workflowRunId);
 }
 
 const FIX_BATCH_SIZE = 10;
@@ -256,9 +258,21 @@ async function finish(
         ? { status: "failed", message: errors.join("; ") }
         : { status: "done", message: errors.length > 0 ? errors.join("; ") : null };
 
+  return report;
+}
+
+// Last step: the text a user pastes into a pull request for the repo's maintainers.
+async function writePullRequest(report: Report, runId: string): Promise<Report> {
+  "use step";
+
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.PUBLIC_HOST;
+  const reportUrl = host ? `https://${host}/runs/${runId}` : null;
+  const pullRequest = buildPullRequest(report, reportUrl);
+
+  await emit("report", pullRequest ? `Pull request text ready: "${pullRequest.title}"` : "No broken links: nothing to fix");
   await emit("report", `Done: ${report.totals.internalBroken + report.totals.externalBroken} broken links`);
   await getWritable<ProgressEvent>().close();
-  return report;
+  return { ...report, pullRequest };
 }
 
 async function emit(stage: ProgressEvent["stage"], message: string) {

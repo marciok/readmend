@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { RunStatusResponse } from "@/app/api/runs/[id]/route";
+import type { PullRequestText } from "@/lib/pull-request";
 import type { BrokenLink, Report } from "@/lib/report";
 import type { Suggestion } from "@/lib/suggest";
 import type { ProgressEvent } from "@/workflows/readme-links";
@@ -17,6 +18,9 @@ const STATUS = {
   failed: { label: "Error", dot: "bg-error", text: "text-error" },
   cancelled: { label: "Canceled", dot: "bg-faint", text: "text-muted" },
 } as const;
+
+// Before the first status poll returns we don't know the state yet; don't claim "Queued".
+const LOADING = { label: "Loading", dot: "bg-faint animate-pulse", text: "text-muted" } as const;
 
 export function RunView({ runId }: { runId: string }) {
   const [run, setRun] = useState<RunStatusResponse | null>(null);
@@ -59,7 +63,7 @@ export function RunView({ runId }: { runId: string }) {
 
   // the form passes the URL along so the header has it before the report exists
   const repo = run?.report?.repo ?? searchParams.get("repo") ?? runId;
-  const status = STATUS[run?.status ?? "pending"];
+  const status = run ? STATUS[run.status] : LOADING;
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,7 +71,7 @@ export function RunView({ runId }: { runId: string }) {
         <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight" title={repo}>
           {repo.replace(/^https?:\/\/github\.com\//, "")}
         </h1>
-        <StatusBadge status={run?.status ?? "pending"} />
+        <StatusBadge status={status} />
       </div>
 
       <dl className="grid grid-cols-2 overflow-hidden rounded-lg border bg-background sm:grid-cols-4 sm:divide-x">
@@ -149,8 +153,7 @@ function useProgress(runId: string, finished: boolean) {
   return events;
 }
 
-function StatusBadge({ status }: { status: keyof typeof STATUS }) {
-  const s = STATUS[status];
+function StatusBadge({ status: s }: { status: { label: string; dot: string } }) {
   return (
     <span id="run-status" className="inline-flex h-7 items-center gap-2 rounded-full border bg-background px-3 text-xs font-medium">
       <span className={`size-2 rounded-full ${s.dot}`} />
@@ -257,6 +260,8 @@ function ReportView({ report }: { report: Report }) {
         <Notice>The crawl stopped at the page limit. Raise &ldquo;Max pages&rdquo; to check the rest.</Notice>
       )}
 
+      {report.pullRequest && <PullRequestPanel pr={report.pullRequest} />}
+
       <section id="broken-links" className="flex flex-col gap-4">
         <SectionHeading title="Broken links" count={brokenCount} />
         {report.fixes.status === "failed" && <Notice>Couldn&apos;t get proposed fixes from eve: {report.fixes.message}</Notice>}
@@ -359,6 +364,60 @@ function SuggestionMeta({ suggestion }: { suggestion: Suggestion }) {
       </div>
       <p className="leading-5 text-muted">{suggestion.reason}</p>
     </div>
+  );
+}
+
+function PullRequestPanel({ pr }: { pr: PullRequestText }) {
+  return (
+    <section id="pull-request" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">Pull request</h2>
+        <CopyButton id="copy-pr" text={`${pr.title}\n\n${pr.body}`} label="Copy all" primary />
+      </div>
+      <p className="-mt-2 text-sm text-muted">
+        Ready to paste into a pull request for the repository&apos;s maintainers, once the fixes are applied.
+      </p>
+      <div className="overflow-hidden rounded-lg border bg-background">
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-xs text-muted">Title</p>
+            <p id="pr-title" className="truncate text-sm font-medium">{pr.title}</p>
+          </div>
+          <CopyButton text={pr.title} label="Copy" />
+        </div>
+        <div className="flex items-center justify-between gap-3 border-b bg-background-subtle px-4 py-2">
+          <p className="text-xs text-muted">Description · Markdown</p>
+          <CopyButton text={pr.body} label="Copy" />
+        </div>
+        <pre id="pr-body" className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[12.5px] leading-6">
+          {pr.body}
+        </pre>
+      </div>
+    </section>
+  );
+}
+
+function CopyButton({ text, label, id, primary }: { text: string; label: string; id?: string; primary?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <button
+      id={id}
+      type="button"
+      onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true))}
+      className={
+        primary
+          ? "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-85"
+          : "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-hover"
+      }
+    >
+      {copied ? "Copied" : label}
+    </button>
   );
 }
 

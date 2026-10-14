@@ -1,4 +1,5 @@
 import { siteRoute, type Link } from "./links";
+import type { PullRequestText } from "./pull-request";
 import type { Suggestion } from "./suggest";
 
 export interface Page {
@@ -94,6 +95,8 @@ export interface Report {
   broken: { page: string; links: BrokenLink[] }[];
   unknown: UnknownLink[];
   fixes: FixStatus;
+  /** Ready-to-paste PR text for the maintainers; null when nothing is broken. */
+  pullRequest: PullRequestText | null;
 }
 
 export function categorize(crawl: CrawlResult): Categorized {
@@ -188,6 +191,7 @@ export function buildReport(crawl: CrawlResult, internal: InternalCheck[], exter
     broken,
     unknown: [...unknownInternal, ...unknownExternal],
     fixes: { status: "none-needed", message: null },
+    pullRequest: null,
   };
 }
 

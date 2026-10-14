@@ -18,8 +18,9 @@ check is a durable workflow run (`workflows/readme-links.ts`):
    link-doctor eve agent (`agent/`), which clones the repo in its own sandbox (network limited to
    github.com), follows renames in git history and replies with structured fixes. The workflow
    starts the session and polls it with durable sleeps, so no step waits on the agent.
-5. **finish**: builds the report, rewrites each fix in the original link's style, and closes the
-   progress stream.
+5. **finish**: builds the report and rewrites each fix in the original link's style.
+6. **writePullRequest**: writes a pull-request title and Markdown description listing every proposed
+   fix by file, plus what still needs a decision, for the user to paste for the maintainers.
 
 The agent is mounted into the Next.js app with `withEve()` and deploys as part of the same Vercel
 project. Its route only accepts Vercel OIDC (this deployment) or local dev, so the public site can't
