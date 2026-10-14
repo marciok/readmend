@@ -43,7 +43,7 @@ export async function snapshotRepo(source: Source, onStatus: (msg: string) => Pr
   const sandbox = await Sandbox.create({
     timeout: 10 * 60_000,
     persistent: false,
-    tags: { app: "readme-links" },
+    tags: { app: "readmend" },
     ...sandboxCredentials(),
   });
 

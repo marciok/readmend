@@ -1,7 +1,10 @@
-# README link checker
+# ReadMend
 
-Paste a repository (or a GitHub `/tree/<branch>/<folder>` link) and get a report of broken links in
-its README and every docs page reachable from it.
+Find broken links in a repository's README and docs. Paste a repository (or a GitHub
+`/tree/<branch>/<folder>` link) and get a report of broken links in its README and every docs page
+reachable from it.
+
+Live at https://readmend.vercel.app
 
 Built with Next.js and the [Workflow SDK](https://workflow-sdk.dev). Each check is a durable workflow
 run (`workflows/readme-links.ts`):

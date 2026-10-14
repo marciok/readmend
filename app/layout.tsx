@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "README Link Checker",
+  title: "ReadMend",
   description: "Find broken links in a repository's README and docs.",
 };
 
