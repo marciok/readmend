@@ -3,10 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-const EXAMPLES = [
-  "https://github.com/vercel/eve/tree/main/docs",
-  "https://github.com/marciok/gust",
-];
+const EXAMPLES = ["https://github.com/vercel/eve/tree/main/docs"];
 
 export function RepoForm() {
   const router = useRouter();
