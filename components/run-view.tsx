@@ -263,6 +263,8 @@ function ReportView({ report }: { report: Report }) {
         <Notice>The crawl stopped at the page limit. Raise &ldquo;Max pages&rdquo; to check the rest.</Notice>
       )}
 
+      {report.badge && <BadgePanel slug={report.badge} />}
+
       {report.pullRequest && <PullRequestPanel pr={report.pullRequest} />}
 
       <section id="broken-links" className="flex flex-col gap-4">
@@ -380,6 +382,29 @@ function SuggestionMeta({ suggestion }: { suggestion: Suggestion }) {
       </div>
       <p className="leading-5 text-muted">{suggestion.reason}</p>
     </div>
+  );
+}
+
+function BadgePanel({ slug }: { slug: string }) {
+  const base = `${window.location.origin}/badge/github/${slug}`;
+  const markdown = `[![doc links](${base}.svg)](${base})`;
+  return (
+    <section id="badge" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight">README badge</h2>
+        <CopyButton id="copy-badge" text={markdown} label="Copy Markdown" primary />
+      </div>
+      <p className="-mt-2 text-sm text-muted">
+        Shows the latest check of this repository and links to its report. It updates whenever someone checks the repo again.
+      </p>
+      <div className="overflow-hidden rounded-lg border bg-background">
+        <div className="flex items-center border-b px-4 py-3">
+          {/* eslint-disable-next-line @next/next/no-img-element -- an SVG badge served by our own route */}
+          <img id="badge-preview" src={`${base}.svg`} alt="doc links badge" height={20} />
+        </div>
+        <pre className="overflow-x-auto bg-background-subtle p-4 font-mono text-[12.5px] leading-6">{markdown}</pre>
+      </div>
+    </section>
   );
 }
 

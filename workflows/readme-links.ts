@@ -1,5 +1,6 @@
 import { FatalError, getWorkflowMetadata, getWritable, sleep } from "workflow";
 import { checkUrl, findReadme, isMarkdown, parseSource } from "@/lib/links";
+import { saveBadge } from "@/lib/badge";
 import { buildPullRequest } from "@/lib/pull-request";
 import { crawl, describeTargets, PermanentError, snapshotRepo } from "@/lib/crawl";
 import {
@@ -59,7 +60,8 @@ export async function readmeLinks(input: RunInput): Promise<Report> {
   const batches = await Promise.all(chunk(problems, FIX_BATCH_SIZE).map((batch) => askLinkDoctor(source, batch)));
 
   const report = await finish(crawled, internalChecks, externalChecks, problems, batches);
-  return await writePullRequest(report, getWorkflowMetadata().workflowRunId);
+  const runId = getWorkflowMetadata().workflowRunId;
+  return await recordBadge(await writePullRequest(report, runId), runId, crawled.scope);
 }
 
 const FIX_BATCH_SIZE = 10;
@@ -273,6 +275,21 @@ async function writePullRequest(report: Report, runId: string): Promise<Report> 
   await emit("report", `Done: ${report.totals.internalBroken + report.totals.externalBroken} broken links`);
   await getWritable<ProgressEvent>().close();
   return { ...report, pullRequest };
+}
+
+// Only a whole-repo check on the default branch speaks for the repo's badge.
+async function recordBadge(report: Report, runId: string, scope: string): Promise<Report> {
+  "use step";
+
+  if (report.ref !== null || scope !== "") return report;
+  try {
+    const record = await saveBadge(report, runId);
+    return { ...report, badge: record?.repo ?? null };
+  } catch (error) {
+    // a storage hiccup shouldn't fail a finished check
+    console.error("could not save badge", error);
+    return report;
+  }
 }
 
 async function emit(stage: ProgressEvent["stage"], message: string) {

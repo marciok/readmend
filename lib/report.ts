@@ -97,6 +97,8 @@ export interface Report {
   fixes: FixStatus;
   /** Ready-to-paste PR text for the maintainers; null when nothing is broken. */
   pullRequest: PullRequestText | null;
+  /** "owner/name" when this run updated the repo's badge: GitHub repos, whole repo, default branch. */
+  badge: string | null;
 }
 
 export function categorize(crawl: CrawlResult): Categorized {
@@ -192,6 +194,7 @@ export function buildReport(crawl: CrawlResult, internal: InternalCheck[], exter
     unknown: [...unknownInternal, ...unknownExternal],
     fixes: { status: "none-needed", message: null },
     pullRequest: null,
+    badge: null,
   };
 }
 
