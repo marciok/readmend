@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { RunStatusResponse } from "@/app/api/runs/[id]/route";
+import { newIssueUrl } from "@/lib/issue";
 import type { PullRequestText } from "@/lib/pull-request";
 import type { BrokenLink, Report } from "@/lib/report";
 import type { Suggestion } from "@/lib/suggest";
@@ -237,6 +238,8 @@ function ReportView({ report }: { report: Report }) {
   const fixedCount = report.broken.flatMap((p) => p.links).filter((l) => l.suggestion?.url).length;
   const github = /^https?:\/\/github\.com\/[^/]+\/[^/]+$/.test(report.cloneUrl) ? report.cloneUrl : null;
   const fileUrl = (page: string) => (github ? `${github}/blob/${report.ref ?? "HEAD"}/${page}` : null);
+  // the report only renders after the first client-side poll, so window is available here
+  const issueUrl = newIssueUrl(report, `${window.location.origin}${window.location.pathname}`);
 
   return (
     <div id="report" className="flex flex-col gap-10">
@@ -263,7 +266,20 @@ function ReportView({ report }: { report: Report }) {
       {report.pullRequest && <PullRequestPanel pr={report.pullRequest} />}
 
       <section id="broken-links" className="flex flex-col gap-4">
-        <SectionHeading title="Broken links" count={brokenCount} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SectionHeading title="Broken links" count={brokenCount} />
+          {issueUrl && (
+            <a
+              id="open-issue"
+              href={issueUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-85"
+            >
+              Open issue on GitHub ↗
+            </a>
+          )}
+        </div>
         {report.fixes.status === "failed" && <Notice>Couldn&apos;t get proposed fixes from eve: {report.fixes.message}</Notice>}
         {report.broken.length === 0 ? (
           <div className="rounded-lg border bg-background p-10 text-center text-sm text-muted">
